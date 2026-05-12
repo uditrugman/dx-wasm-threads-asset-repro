@@ -1,24 +1,12 @@
-# Wasm-threads rustflags. Same set as RReverser/wasm-bindgen-rayon and
-# https://github.com/wheregmis/rustflags_dioxus (which was the
-# reproducer for dioxuslabs/dioxus#5079). This is the minimum needed
-# to compile `cpal`'s `audioworklet` backend or anything else that
-# uses wasm shared memory + atomics.
-
+# Minimum flag set that triggers the bug.
+#
+# Bisection (see README) reduced the original wasm-threads set down
+# to two settings: `+atomics` plus a rebuilt std. Either one alone
+# is fine; together they break dx's asset scanner.
 [target.wasm32-unknown-unknown]
 rustflags = [
-    "-C", "target-feature=+atomics,+bulk-memory,+mutable-globals",
-    "-C", "link-arg=--shared-memory",
-    "-C", "link-arg=--import-memory",
-    "-C", "link-arg=--max-memory=1073741824",
-    "-C", "link-arg=--export=__heap_base",
-    "-C", "link-arg=--export=__wasm_init_tls",
-    "-C", "link-arg=--export=__tls_size",
-    "-C", "link-arg=--export=__tls_align",
-    "-C", "link-arg=--export=__tls_base",
+    "-C", "target-feature=+atomics",
 ]
 
-# `-Z build-std=...` is required so the standard library is rebuilt
-# with `+atomics` and `+bulk-memory`. Without it `rust-lld` rejects
-# `--shared-memory` because the prebuilt std lacks those features.
 [unstable]
 build-std = ["panic_abort", "std"]
