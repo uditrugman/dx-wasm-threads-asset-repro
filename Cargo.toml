@@ -1,0 +1,8 @@
+[package]
+name = "dx-wasm-threads-asset-repro"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+dioxus = { version = "0.7.9", features = ["web"] }

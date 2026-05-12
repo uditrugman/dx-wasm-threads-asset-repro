@@ -1,0 +1,24 @@
+# Wasm-threads rustflags. Same set as RReverser/wasm-bindgen-rayon and
+# https://github.com/wheregmis/rustflags_dioxus (which was the
+# reproducer for dioxuslabs/dioxus#5079). This is the minimum needed
+# to compile `cpal`'s `audioworklet` backend or anything else that
+# uses wasm shared memory + atomics.
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "target-feature=+atomics,+bulk-memory,+mutable-globals",
+    "-C", "link-arg=--shared-memory",
+    "-C", "link-arg=--import-memory",
+    "-C", "link-arg=--max-memory=1073741824",
+    "-C", "link-arg=--export=__heap_base",
+    "-C", "link-arg=--export=__wasm_init_tls",
+    "-C", "link-arg=--export=__tls_size",
+    "-C", "link-arg=--export=__tls_align",
+    "-C", "link-arg=--export=__tls_base",
+]
+
+# `-Z build-std=...` is required so the standard library is rebuilt
+# with `+atomics` and `+bulk-memory`. Without it `rust-lld` rejects
+# `--shared-memory` because the prebuilt std lacks those features.
+[unstable]
+build-std = ["panic_abort", "std"]
