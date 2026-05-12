@@ -1,0 +1,106 @@
+name: bisect dx asset bug
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  bisect:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: "latest nightly + dx 0.7.9",         rust: nightly,            dioxus: "0.7.9" }
+          - { label: "nightly-2026-04-01 + dx 0.7.9",     rust: nightly-2026-04-01, dioxus: "0.7.9" }
+          - { label: "nightly-2026-02-01 + dx 0.7.9",     rust: nightly-2026-02-01, dioxus: "0.7.9" }
+          - { label: "nightly-2025-12-15 + dx 0.7.9",     rust: nightly-2025-12-15, dioxus: "0.7.9" }
+          - { label: "nightly-2025-10-01 + dx 0.7.9",     rust: nightly-2025-10-01, dioxus: "0.7.9" }
+          - { label: "latest nightly + dx 0.7.7",         rust: nightly,            dioxus: "0.7.7" }
+          - { label: "latest nightly + dx 0.7.3",         rust: nightly,            dioxus: "0.7.3" }
+          - { label: "nightly-2025-12-15 + dx 0.7.3 (PR #5163 era)", rust: nightly-2025-12-15, dioxus: "0.7.3" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rust-src
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust }}-${{ matrix.dioxus }}
+
+      - name: install dx ${{ matrix.dioxus }}
+        run: cargo install dioxus-cli --version ${{ matrix.dioxus }} --locked
+
+      - name: pin dioxus crate to ${{ matrix.dioxus }}
+        run: |
+          sed -i "s|^dioxus = { version = \"[^\"]*\"|dioxus = { version = \"${{ matrix.dioxus }}\"|" Cargo.toml
+          rm -f Cargo.lock
+          echo "--- Cargo.toml ---"
+          cat Cargo.toml
+
+      - name: capture tool versions
+        run: |
+          {
+            echo "## ${{ matrix.label }}"
+            echo ""
+            echo "<details><summary>tool versions</summary>"
+            echo ""
+            echo "\`\`\`"
+            echo "rustc: $(rustc --version)"
+            echo "dx:    $(dx --version)"
+            echo "wasm-bindgen: $(wasm-bindgen --version 2>/dev/null || echo '(none on PATH; dx may auto-install one)')"
+            echo "\`\`\`"
+            echo ""
+            echo "</details>"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: dx build --platform web
+        id: build
+        run: |
+          set -o pipefail
+          dx build --platform web 2>&1 | tee build.log
+        continue-on-error: true
+
+      - name: inspect output
+        run: |
+          set +e
+          ASSETS_DIR="target/dx/dx-wasm-threads-asset-repro/debug/web/public/assets"
+          WASM_FILE=$(find target/dx -name '*_bg.wasm' 2>/dev/null | head -1)
+          ASSET_COUNT=$(ls "$ASSETS_DIR" 2>/dev/null | wc -l | xargs)
+          WARN_COUNT=$(grep -cE 'Failed to deserialize|Found.*could not be deserialized' build.log)
+          if [ -n "$WASM_FILE" ]; then
+            PLACEHOLDER_COUNT=$(strings "$WASM_FILE" 2>/dev/null | grep -c "This should be replaced")
+          else
+            PLACEHOLDER_COUNT="(no wasm produced)"
+          fi
+          BUILD_OK="${{ steps.build.outcome == 'success' && '✅' || '❌' }}"
+          if [ "$ASSET_COUNT" -gt 0 ] 2>/dev/null; then
+            ASSETS_OK="✅ $ASSET_COUNT"
+          else
+            ASSETS_OK="❌ empty"
+          fi
+
+          {
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Build | $BUILD_OK |"
+            echo "| Files in \`public/assets/\` | $ASSETS_OK |"
+            echo "| Deserialize warnings in log | $WARN_COUNT |"
+            echo "| Unpatched \"should be replaced\" strings in wasm | $PLACEHOLDER_COUNT |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-${{ matrix.rust }}-dx${{ matrix.dioxus }}
+          path: build.log
